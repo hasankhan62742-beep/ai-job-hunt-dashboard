@@ -19,12 +19,18 @@ A killer dashboard with a strict honesty contract:
 Add more boards in `backend/config.yaml` (any `boards.greenhouse.io/{slug}`
 or `jobs.lever.co/{Slug}`).
 
-## Paid (optional): CV analysis
+## CV analysis (LLM — optional, pick one)
 
-`POST /api/analyze` uses the Anthropic Messages API with **your** key, kept
-**server-side only** in `backend/.env` — the browser never sees it and never
-calls Anthropic directly. Without a key, CV analysis is cleanly disabled and
-job listings keep working.
+`POST /api/analyze` uses an LLM with **your** key, kept **server-side only**
+in `backend/.env` — the browser never sees it and never calls the LLM directly.
+Without a key, CV analysis is cleanly disabled and job listings keep working.
+
+- **Free:** Google Gemini — get a free key at
+  [Google AI Studio](https://aistudio.google.com), set `GEMINI_API_KEY`
+  (free tier has rate limits; fine for CV analysis).
+- **Paid:** Anthropic — set `ANTHROPIC_API_KEY` (+ verify `ANTHROPIC_MODEL`).
+- `LLM_PROVIDER=auto` (default) uses whichever key is set; force with
+  `LLM_PROVIDER=gemini|anthropic`.
 
 ## Run locally
 

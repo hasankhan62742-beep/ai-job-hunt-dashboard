@@ -1,15 +1,18 @@
 """AI Job Hunt Dashboard — backend API.
 
-- POST /api/analyze  — CV upload -> server-side text extraction -> Anthropic
+- POST /api/analyze  — CV upload -> server-side text extraction -> LLM
                        analysis (profile, gaps, roadmap). The LLM NEVER invents
                        job listings; jobs come only from /api/jobs.
 - GET  /api/jobs     — REAL listings from verified sources (Greenhouse, Lever,
                        RemoteOK public APIs — free, no key).
 - POST /api/search   — trigger a fresh research run (background).
 - GET  /api/sources  — source health.
-- GET  /api/health   — liveness.
+- GET  /api/health   — liveness (also reports the active LLM provider).
 
-The Anthropic API key lives ONLY here (env var), never in the frontend.
+LLM providers (first configured wins, or set LLM_PROVIDER=gemini|anthropic):
+- Gemini (Google AI Studio — free tier): GEMINI_API_KEY
+- Anthropic: ANTHROPIC_API_KEY
+Keys live ONLY here (env vars), never in the frontend.
 """
 from __future__ import annotations
 
@@ -55,8 +58,11 @@ def get_store():
     finally:
         c.close()
 
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "auto").strip().lower()  # auto|anthropic|gemini
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
 MAX_CV_BYTES = 10 * 1024 * 1024
 
 ANALYZE_PROMPT = """You are an expert AI recruiter and career coach.
@@ -88,19 +94,36 @@ Resume:
 """
 
 
-def call_anthropic(prompt: str, pdf_b64: str | None = None) -> str:
-    if not ANTHROPIC_KEY:
-        raise HTTPException(
-            status_code=503,
-            detail="ANTHROPIC_API_KEY is not set on the server. "
-                   "Add it to backend/.env — CV analysis is disabled until then. "
-                   "Job listings (/api/jobs) work without it.",
-        )
+def active_llm() -> str | None:
+    """Which LLM provider is usable right now (None = CV analysis disabled)."""
+    if LLM_PROVIDER == "anthropic":
+        return "anthropic" if ANTHROPIC_KEY else None
+    if LLM_PROVIDER == "gemini":
+        return "gemini" if GEMINI_KEY else None
+    # auto: prefer whichever key exists
+    if GEMINI_KEY:
+        return "gemini"
+    if ANTHROPIC_KEY:
+        return "anthropic"
+    return None
+
+
+def _llm_unavailable() -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail="No LLM API key is set on the server (GEMINI_API_KEY or "
+               "ANTHROPIC_API_KEY). Add one to enable CV analysis — "
+               "job listings (/api/jobs) work without it.",
+    )
+
+
+def call_anthropic(prompt: str, file_b64: str | None = None,
+                   mime: str = "application/pdf") -> str:
     content: list[dict] = []
-    if pdf_b64:
-        content.append({"type": "document",
-                        "source": {"type": "base64", "media_type": "application/pdf",
-                                   "data": pdf_b64}})
+    if file_b64:
+        block_type = "document" if mime == "application/pdf" else "image"
+        content.append({f"type": block_type,
+                        "source": {"type": "base64", "media_type": mime, "data": file_b64}})
     content.append({"type": "text", "text": prompt})
     try:
         r = requests.post(
@@ -123,9 +146,52 @@ def call_anthropic(prompt: str, pdf_b64: str | None = None) -> str:
     return "\n".join(b.get("text", "") for b in data.get("content", []))
 
 
+def call_gemini(prompt: str, file_b64: str | None = None,
+                mime: str = "application/pdf") -> str:
+    """Google Gemini via AI Studio API (free tier available)."""
+    parts: list[dict] = []
+    if file_b64:
+        parts.append({"inlineData": {"mimeType": mime, "data": file_b64}})
+    parts.append({"text": prompt})
+    url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
+           f"{GEMINI_MODEL}:generateContent")
+    try:
+        r = requests.post(url, params={"key": GEMINI_KEY},
+                          json={"contents": [{"parts": parts}]}, timeout=120)
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"LLM provider unreachable: {e}")
+    if r.status_code != 200:
+        raise HTTPException(status_code=502,
+                            detail=f"LLM provider error {r.status_code}: {r.text[:300]}")
+    data = r.json()
+    if data.get("error"):
+        raise HTTPException(status_code=502,
+                            detail=data["error"].get("message", "LLM error"))
+    texts = []
+    for cand in data.get("candidates", []):
+        for part in (cand.get("content") or {}).get("parts", []):
+            if part.get("text"):
+                texts.append(part["text"])
+    if not texts:
+        raise HTTPException(status_code=502, detail="LLM returned no text.")
+    return "\n".join(texts)
+
+
+def run_analysis(prompt: str, file_b64: str | None = None,
+                 mime: str = "application/pdf") -> str:
+    provider = active_llm()
+    if provider == "gemini":
+        return call_gemini(prompt, file_b64, mime)
+    if provider == "anthropic":
+        return call_anthropic(prompt, file_b64, mime)
+    raise _llm_unavailable()
+
+
 @app.get("/api/health")
 def health():
-    return {"ok": True, "llm_configured": bool(ANTHROPIC_KEY)}
+    provider = active_llm()
+    return {"ok": True, "llm_configured": provider is not None,
+            "llm_provider": provider}
 
 
 @app.post("/api/analyze")
@@ -143,7 +209,7 @@ async def analyze(file: UploadFile = File(...), store: Store = Depends(get_store
     try:
         if suffix == ".pdf":
             text, meta = extract_text(tmp_path)
-            analysis = call_anthropic(ANALYZE_PROMPT.format(cv_text=text[:30000]))
+            analysis = run_analysis(ANALYZE_PROMPT.format(cv_text=text[:30000]))
             prof = build_profile(text)
         else:
             import base64
@@ -151,35 +217,9 @@ async def analyze(file: UploadFile = File(...), store: Store = Depends(get_store
             media = {"png": "image/png", "jpg": "image/jpeg",
                      "jpeg": "image/jpeg", "webp": "image/webp"}[suffix[1:]]
             # vision: image + same rules (no invented jobs)
-            content_blocks = [
-                {"type": "image",
-                 "source": {"type": "base64", "media_type": media, "data": b64}},
-                {"type": "text", "text": ANALYZE_PROMPT.format(
-                    cv_text="[resume image above — read it visually]")},
-            ]
-            if not ANTHROPIC_KEY:
-                raise HTTPException(
-                    status_code=503,
-                    detail="ANTHROPIC_API_KEY is not set on the server. "
-                           "Add it to backend/.env — CV analysis is disabled until then.")
-            try:
-                r = requests.post(
-                    "https://api.anthropic.com/v1/messages",
-                    headers={"x-api-key": ANTHROPIC_KEY,
-                             "anthropic-version": "2023-06-01",
-                             "content-type": "application/json"},
-                    json={"model": ANTHROPIC_MODEL, "max_tokens": 4000,
-                          "messages": [{"role": "user", "content": content_blocks}]},
-                    timeout=120)
-            except requests.RequestException as e:
-                raise HTTPException(status_code=502, detail=f"LLM provider unreachable: {e}")
-            if r.status_code != 200:
-                raise HTTPException(status_code=502,
-                                    detail=f"LLM provider error {r.status_code}: {r.text[:300]}")
-            payload = r.json()
-            if payload.get("error"):
-                raise HTTPException(status_code=502, detail=payload["error"].get("message"))
-            analysis = "\n".join(b.get("text", "") for b in payload.get("content", []))
+            analysis = run_analysis(
+                ANALYZE_PROMPT.format(cv_text="[resume image attached — read it visually]"),
+                file_b64=b64, mime=media)
             prof = build_profile("")
             meta = {"ocr_used": False, "injection_flag": False}
     except CVError as e:
@@ -190,7 +230,7 @@ async def analyze(file: UploadFile = File(...), store: Store = Depends(get_store
     d = profile_to_dict(prof)
     now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
     store.conn.execute(
-        """INSERT INTO candidate_profilesINSERT INTO candidate_profiles
+        """INSERT INTO candidate_profiles
            (name,email,phone,country,city,target_countries,work_arrangements,
             skills_extracted,skills_inferred,education,experience_years,languages,
             target_titles,employment_types,salary_expectation,summary,created_at,updated_at)
