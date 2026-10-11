@@ -9,7 +9,8 @@
 - GET  /api/sources  — source health.
 - GET  /api/health   — liveness (also reports the active LLM provider).
 
-LLM providers (first configured wins, or set LLM_PROVIDER=gemini|anthropic):
+LLM providers (first configured wins, or set LLM_PROVIDER=groq|gemini|anthropic):
+- Groq (free tier, no card: https://console.groq.com): GROQ_API_KEY
 - Gemini (Google AI Studio — free tier): GEMINI_API_KEY
 - Anthropic: ANTHROPIC_API_KEY
 Keys live ONLY here (env vars), never in the frontend.
@@ -58,7 +59,10 @@ def get_store():
     finally:
         c.close()
 
-LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "auto").strip().lower()  # auto|anthropic|gemini
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "auto").strip().lower()  # auto|groq|anthropic|gemini
+GROQ_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
+GROQ_VISION_MODEL = os.environ.get("GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
@@ -96,11 +100,15 @@ Resume:
 
 def active_llm() -> str | None:
     """Which LLM provider is usable right now (None = CV analysis disabled)."""
+    if LLM_PROVIDER == "groq":
+        return "groq" if GROQ_KEY else None
     if LLM_PROVIDER == "anthropic":
         return "anthropic" if ANTHROPIC_KEY else None
     if LLM_PROVIDER == "gemini":
         return "gemini" if GEMINI_KEY else None
-    # auto: prefer whichever key exists
+    # auto: prefer whichever key exists (free-first order)
+    if GROQ_KEY:
+        return "groq"
     if GEMINI_KEY:
         return "gemini"
     if ANTHROPIC_KEY:
@@ -111,10 +119,50 @@ def active_llm() -> str | None:
 def _llm_unavailable() -> HTTPException:
     return HTTPException(
         status_code=503,
-        detail="No LLM API key is set on the server (GEMINI_API_KEY or "
-               "ANTHROPIC_API_KEY). Add one to enable CV analysis — "
+        detail="No LLM API key is set on the server (GROQ_API_KEY, GEMINI_API_KEY "
+               "or ANTHROPIC_API_KEY). Add one to enable CV analysis — "
                "job listings (/api/jobs) work without it.",
     )
+
+
+def call_groq(prompt: str, file_b64: str | None = None,
+              mime: str = "application/pdf") -> str:
+    """Groq via its OpenAI-compatible API (free tier, no card required)."""
+    if file_b64:
+        model = GROQ_VISION_MODEL
+        content: str | list[dict] = [
+            {"type": "image_url",
+             "image_url": {"url": f"data:{mime};base64,{file_b64}"}},
+            {"type": "text", "text": prompt},
+        ]
+    else:
+        model = GROQ_MODEL
+        content = prompt
+    try:
+        r = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_KEY}",
+                     "content-type": "application/json"},
+            json={"model": model,
+                  "messages": [{"role": "user", "content": content}],
+                  "max_tokens": 4000, "temperature": 0.3},
+            timeout=120,
+        )
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"LLM provider unreachable: {e}")
+    if r.status_code != 200:
+        raise HTTPException(status_code=502,
+                            detail=f"LLM provider error {r.status_code}: {r.text[:300]}")
+    data = r.json()
+    if data.get("error"):
+        err = data["error"]
+        msg = err.get("message", "LLM error") if isinstance(err, dict) else str(err)
+        raise HTTPException(status_code=502, detail=msg)
+    try:
+        text = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        raise HTTPException(status_code=502, detail="LLM returned no text.")
+    return text
 
 
 def call_anthropic(prompt: str, file_b64: str | None = None,
@@ -180,6 +228,8 @@ def call_gemini(prompt: str, file_b64: str | None = None,
 def run_analysis(prompt: str, file_b64: str | None = None,
                  mime: str = "application/pdf") -> str:
     provider = active_llm()
+    if provider == "groq":
+        return call_groq(prompt, file_b64, mime)
     if provider == "gemini":
         return call_gemini(prompt, file_b64, mime)
     if provider == "anthropic":

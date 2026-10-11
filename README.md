@@ -25,12 +25,16 @@ or `jobs.lever.co/{Slug}`).
 in `backend/.env` — the browser never sees it and never calls the LLM directly.
 Without a key, CV analysis is cleanly disabled and job listings keep working.
 
+- **Free:** Groq — free key at [console.groq.com](https://console.groq.com)
+  (no credit card), set `GROQ_API_KEY`. Models via `GROQ_MODEL`
+  (default `openai/gpt-oss-120b`) and `GROQ_VISION_MODEL`
+  (default `qwen/qwen3.6-27b`) — override if Groq retires them.
 - **Free:** Google Gemini — get a free key at
   [Google AI Studio](https://aistudio.google.com), set `GEMINI_API_KEY`
   (free tier has rate limits; fine for CV analysis).
 - **Paid:** Anthropic — set `ANTHROPIC_API_KEY` (+ verify `ANTHROPIC_MODEL`).
-- `LLM_PROVIDER=auto` (default) uses whichever key is set; force with
-  `LLM_PROVIDER=gemini|anthropic`.
+- `LLM_PROVIDER=auto` (default) uses whichever key is set (Groq first);
+  force with `LLM_PROVIDER=groq|gemini|anthropic`.
 
 ## Run locally
 
