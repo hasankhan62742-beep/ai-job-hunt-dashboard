@@ -62,7 +62,7 @@ LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "auto").strip().lower()  # auto|an
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
 MAX_CV_BYTES = 10 * 1024 * 1024
 
 ANALYZE_PROMPT = """You are an expert AI recruiter and career coach.
