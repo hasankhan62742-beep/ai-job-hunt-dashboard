@@ -274,15 +274,6 @@ async def analyze(file: UploadFile = File(...), store: Store = Depends(get_store
             meta = {"ocr_used": False, "injection_flag": False}
     except CVError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    except HTTPException:
-        raise
-    except Exception:
-        # TEMPORARY DEBUG — remove after diagnosing the live 500
-        import traceback
-        raise HTTPException(
-            status_code=500,
-            detail="DEBUG-TRACEBACK:\n" + traceback.format_exc()[-3000:],
-        )
     finally:
         Path(tmp_path).unlink(missing_ok=True)
 

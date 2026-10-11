@@ -89,7 +89,10 @@ CREATE TABLE IF NOT EXISTS audit_events (
 def connect(db_path: str | Path) -> sqlite3.Connection:
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path))
+    # check_same_thread=False: FastAPI>=0.14x runs sync yield-dependencies'
+    # __enter__/__exit__ in different worker threads. Each request still gets
+    # its own connection (see get_store), used sequentially, never concurrently.
+    conn = sqlite3.connect(str(db_path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
