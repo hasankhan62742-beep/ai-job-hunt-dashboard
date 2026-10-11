@@ -38,7 +38,11 @@ with connect(settings.db_path) as _c:
 app = FastAPI(title="AI Job Hunt Dashboard API")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    # Comma-separated in production, e.g.
+    # FRONTEND_ORIGIN=https://your-app.vercel.app
+    allow_origins=[o.strip() for o in
+                   os.environ.get("FRONTEND_ORIGIN",
+                                  "http://localhost:5173,http://127.0.0.1:5173").split(",")],
     allow_methods=["*"],
     allow_headers=["*"],
 )

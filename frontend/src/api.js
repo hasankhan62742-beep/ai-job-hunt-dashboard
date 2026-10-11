@@ -1,6 +1,8 @@
 // Backend API client. All secrets stay server-side; the browser never
 // talks to the LLM provider directly.
-const BASE = "";
+// In production, set VITE_API_URL to your backend URL (e.g. on Vercel:
+// VITE_API_URL=https://your-api.onrender.com). Local dev uses the Vite proxy.
+const BASE = import.meta.env.VITE_API_URL || "";
 
 async function check(res) {
   if (!res.ok) {
