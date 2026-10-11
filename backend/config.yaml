@@ -1,0 +1,50 @@
+# Source registry. Each entry maps to one adapter instance.
+# Tokens/slugs verified live on 2026-10-11. Add more by copying a block.
+# Greenhouse board token = the slug in https://boards.greenhouse.io/{token}
+sources:
+  - name: greenhouse-appier
+    type: greenhouse
+    token: appier
+    label: Appier (AI company, Greenhouse board)
+    coverage: Global (check each posting)
+    docs_url: https://developers.greenhouse.io/job-board.html
+  - name: greenhouse-glean
+    type: greenhouse
+    token: gleanwork
+    label: Glean (AI search, Greenhouse board)
+    coverage: US / India / remote (check each posting)
+    docs_url: https://developers.greenhouse.io/job-board.html
+  - name: greenhouse-airbnb
+    type: greenhouse
+    token: airbnb
+    label: Airbnb (Greenhouse board)
+    coverage: Global (check each posting)
+    docs_url: https://developers.greenhouse.io/job-board.html
+  - name: lever-qover
+    type: lever
+    slug: Qover
+    region: us
+    label: Qover (Lever board)
+    coverage: Belgium / hybrid (check each posting)
+    docs_url: https://github.com/lever/postings-api
+  - name: lever-xm
+    type: lever
+    slug: xm
+    region: eu
+    label: XM (Lever EU board)
+    coverage: Cyprus / EU (check each posting)
+    docs_url: https://github.com/lever/postings-api
+  - name: remoteok
+    type: remoteok
+    label: RemoteOK (remote-only job board)
+    coverage: Worldwide remote
+    tags: [machine learning, data science, python, ai]
+    docs_url: https://remoteok.com/api
+
+# Discovery behaviour
+discovery:
+  per_source_timeout_seconds: 25
+  max_jobs_per_source: 150
+  min_seconds_between_requests: 1.0
+  verify_new_listings: true
+  verify_max_per_run: 60
